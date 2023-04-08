@@ -3,35 +3,33 @@ from __future__ import absolute_import
 from torch import nn
 import torch
 from .modules import FixupConvModule, FixupResidualChain
+from dataclasses import dataclass
 
+
+@dataclass
+class FixUpUnetConfig:
+    feat: int = 64
+    in_feat: int = 3
+    out_feat: int = 3
+    down_layers: int = 5
+    identity_layers: int = 3
+    bottleneck_layers: int = 6
+    skips: bool = True
+    act_fn: str = "relu"
+    out_act_fn: str = "none"
+    max_feat: int = 512
+    script_submodules: bool = True
+    dim: int = 2
+
+    def init(self):
+        return FixUpUnet(self)
 
 class FixUpUnet(nn.Module):
     """
     Unet using residual blocks and residual chains without any normalization layer.
-    Example of cfg to instanciate the network:
-
-    from omegaconf import DictConfig
-    cfg = DictConfig(
-        {
-            "feat": 32,
-            "in_feat": 3,
-            "out_feat": 3,
-            "down_layers": 5,
-            "identity_layers": 3,
-            "bottleneck_layers": 6,
-            "skips": True,
-            "act_fn": "relu",
-            "out_act_fn": "none",
-            "max_feat": 256,
-            "script_submodules": True,
-            "dim": 2,
-        }
-    )
-
-
     """
 
-    def __init__(self, cfg):
+    def __init__(self, cfg: FixUpUnetConfig):
         super(FixUpUnet, self).__init__()
 
         feat = cfg.feat
@@ -97,7 +95,7 @@ class FixUpUnet(nn.Module):
             feat_next = min(2 ** (i - 1) * feat, max_feat)
             # Upsample
             self.up_layers.append(
-                nn.Upsample(scale_factor=2, mode=upsample_mode, align_corners=False)
+                CastUpsample()
             )
             # Eventually merge skip and upsample
             feat_inter = feat_next + feat_curr if self.skip else feat_curr
@@ -166,3 +164,12 @@ class FixUpUnet(nn.Module):
                     x = torch.cat([x, skips.pop()], dim=1)
 
         return self.out_conv(x)
+
+
+class CastUpsample(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.upsample = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False).float()
+
+    def forward(self, x):
+        return self.upsample(x.float()).to(x.dtype)
